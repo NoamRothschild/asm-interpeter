@@ -38,6 +38,7 @@ pub const InstructionType = enum {
     jc,
     jnc,
     jz,
+    hlt,
 
     const self = @This();
     pub fn fromString(mnemonic: []const u8) ?self {
@@ -52,7 +53,7 @@ pub const InstructionType = enum {
 
 pub const Instruction = struct {
     inst: InstructionType,
-    left_operand: operand.Operand,
+    left_operand: ?operand.Operand,
     right_operand: ?operand.Operand,
     indexing_mode: IndexMode,
 };

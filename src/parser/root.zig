@@ -34,6 +34,7 @@ pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) ![]Instruction 
 
         try instructions.append(try parseInstruction(instruction));
     }
+    try instructions.append(try parseInstruction("hlt"));
 
     const instruction_arr: []Instruction = try allocator.alloc(Instruction, instructions.items.len);
     @memcpy(instruction_arr, instructions.items);
@@ -41,11 +42,21 @@ pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) ![]Instruction 
 }
 
 pub fn parseInstruction(inst_raw: []const u8) !Instruction {
-    const inst_type_end = (std.mem.indexOf(u8, inst_raw, " ") orelse inst_raw.len - 1);
+    const inst_type_end = (std.mem.indexOf(u8, inst_raw, " ") orelse inst_raw.len);
     const inst_str_type = inst_raw[0..inst_type_end];
     // std.debug.print("inst_type: {s}\n", .{inst_str_type});
-    const inst_type = InstructionType.fromString(inst_str_type);
-    if (inst_type == null) return ParseErrors.UnknownInstruction;
+    const might_inst_type = InstructionType.fromString(inst_str_type);
+    if (might_inst_type == null) return ParseErrors.UnknownInstruction;
+    const inst_type = might_inst_type.?;
+
+    if (inst_type_end == inst_raw.len) {
+        return Instruction{
+            .inst = inst_type,
+            .left_operand = null,
+            .right_operand = null,
+            .indexing_mode = .unknown,
+        };
+    }
 
     var it = std.mem.splitScalar(u8, inst_raw[inst_type_end + 1 ..], ',');
     const left_op_str = std.mem.trim(u8, it.next() orelse "", &std.ascii.whitespace);
@@ -54,7 +65,7 @@ pub fn parseInstruction(inst_raw: []const u8) !Instruction {
     var left_index_mode: IndexMode = .unknown;
     var right_index_mode: IndexMode = .unknown;
 
-    const left_op = try operand.parseOperand(left_op_str, &left_index_mode) orelse return error.NoOperandFound;
+    const left_op = try operand.parseOperand(left_op_str, &left_index_mode);
     const right_op = try operand.parseOperand(right_op_str, &right_index_mode);
 
     const indexing_mode: IndexMode = blk: {
@@ -77,7 +88,7 @@ pub fn parseInstruction(inst_raw: []const u8) !Instruction {
     };
 
     return Instruction{
-        .inst = inst_type.?,
+        .inst = inst_type,
         .left_operand = left_op,
         .right_operand = right_op,
         .indexing_mode = indexing_mode,
@@ -120,4 +131,11 @@ test "test parse instruction" {
         .right_operand = .{ .mem = .{ .base = .bp, .index = .si, .displacement = operand.wrapIntImm(0x8 - 2) } },
         .indexing_mode = ._16bit,
     }, try parseInstruction("lea bx, [bp + 8h + si-2d]"));
+
+    try testing.expectEqual(Instruction{
+        .inst = .hlt,
+        .left_operand = null,
+        .right_operand = null,
+        .indexing_mode = .unknown,
+    }, try parseInstruction("hlt"));
 }
