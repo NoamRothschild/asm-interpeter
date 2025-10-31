@@ -38,6 +38,10 @@ pub const InstructionType = enum {
     jc,
     jnc,
     jz,
+    jnz,
+    jcxz,
+    jnbe,
+    jnae,
     hlt,
 
     const self = @This();

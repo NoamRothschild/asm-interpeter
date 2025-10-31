@@ -9,6 +9,7 @@ pub const Operand = union(enum) {
     imm: u16,
     reg: RegisterIdentifier,
     mem: MemoryExpr,
+    unverified_label: []const u8, // a temporary value that will either be replaced with imm later or result in an err
 };
 
 const MemExprPtrType = enum { unknown, byte_ptr, word_ptr };
@@ -32,7 +33,7 @@ pub const OperandParseErrors = error{
 /// returns `null` when raw_op.len == 0
 /// fails if an operand was found, but was unable to be diagnosed, or
 /// an error had occured while parsig after the operand type had been found.
-pub fn parseOperand(raw_op: []const u8, mode: *IndexMode) !?Operand {
+pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *IndexMode) !?Operand {
     if (raw_op.len == 0) return null;
 
     const might_reg = register.fromString(raw_op);
@@ -65,7 +66,7 @@ pub fn parseOperand(raw_op: []const u8, mode: *IndexMode) !?Operand {
         return Operand{ .mem = mem_expr };
     }
 
-    return OperandParseErrors.NoOperandForString;
+    return Operand{ .unverified_label = try allocator.dupe(u8, raw_op) };
 }
 
 fn parseImmediate(imm: []const u8) !?u16 {

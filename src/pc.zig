@@ -1,5 +1,5 @@
-const parser = @import("parser/root.zig");
 const std = @import("std");
+const parser = @import("parser/root.zig");
 
 // NOTE: we could start code execution at the label "_start"'s index instead of 0
 
@@ -18,5 +18,5 @@ pub const CPUContext = struct {
 
     code: []const parser.Instruction,
     /// map of label_name -> instruction index in `code`
-    label_references: std.AutoHashMap([]const u8, usize),
+    label_references: parser.LabelMap,
 };
