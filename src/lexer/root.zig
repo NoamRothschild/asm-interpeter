@@ -16,17 +16,28 @@ pub const ParseErrors = error{
 };
 
 pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) ![]Instruction {
-    const instructions = std.ArrayList(Instruction).init(allocator);
-    _ = raw_code;
-    _ = instructions;
-    // go over each line of code (sep = '\n')
-    // strip line
-    //
-    // parse instruction:
-    // instType = line until isWhitespace == true
-    // lhs = from end of instType until ',' or eol
-    // ?rhs = from end of lhs until end, or null if not found
-    // determine indexing mode from lhs || rhs
+    var instructions = std.ArrayList(Instruction).init(allocator);
+    defer instructions.deinit();
+    var it = std.mem.splitAny(u8, raw_code, "\r\n");
+
+    while (it.next()) |raw_line| {
+        const line_no_comment = raw_line[0 .. std.mem.indexOfScalar(u8, raw_line, ';') orelse raw_line.len];
+        const line_lowercased = blk: {
+            var buff = try allocator.alloc(u8, line_no_comment.len);
+            @memcpy(buff, line_no_comment);
+            for (0..buff.len) |i|
+                buff[i] = std.ascii.toLower(buff[i]);
+            break :blk buff;
+        };
+        defer allocator.free(line_lowercased);
+        const instruction = std.mem.trim(u8, line_lowercased, &std.ascii.whitespace);
+
+        try instructions.append(try parseInstruction(instruction));
+    }
+
+    const instruction_arr: []Instruction = try allocator.alloc(Instruction, instructions.items.len);
+    @memcpy(instruction_arr, instructions.items);
+    return instruction_arr;
 }
 
 pub fn parseInstruction(inst_raw: []const u8) !Instruction {
@@ -43,7 +54,7 @@ pub fn parseInstruction(inst_raw: []const u8) !Instruction {
     var left_index_mode: IndexMode = .unknown;
     var right_index_mode: IndexMode = .unknown;
 
-    const left_op = try operand.parseOperand(left_op_str, &left_index_mode);
+    const left_op = try operand.parseOperand(left_op_str, &left_index_mode) orelse return error.NoOperandFound;
     const right_op = try operand.parseOperand(right_op_str, &right_index_mode);
 
     const indexing_mode: IndexMode = blk: {

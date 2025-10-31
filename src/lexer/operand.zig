@@ -28,8 +28,13 @@ pub const OperandParseErrors = error{
     NoOperandForString,
 };
 
-/// parses a whitespace stripped instruction
-pub fn parseOperand(raw_op: []const u8, mode: *IndexMode) !Operand {
+/// parses an operand.
+/// returns `null` when raw_op.len == 0
+/// fails if an operand was found, but was unable to be diagnosed, or
+/// an error had occured while parsig after the operand type had been found.
+pub fn parseOperand(raw_op: []const u8, mode: *IndexMode) !?Operand {
+    if (raw_op.len == 0) return null;
+
     const might_reg = register.fromString(raw_op);
     if (might_reg) |reg| {
         switch (reg) {
@@ -68,7 +73,9 @@ fn parseImmediate(imm: []const u8) !?u16 {
     if (imm.len == 0)
         return null;
 
-    if (std.mem.startsWith(u8, imm, "0b")) {
+    if (imm.len == 3 and imm[0] == imm[2] and imm[0] == '\'') {
+        rvalue = imm[1];
+    } else if (std.mem.startsWith(u8, imm, "0b")) {
         rvalue = try std.fmt.parseInt(isize, imm[2..], 2);
     } else if (std.mem.startsWith(u8, imm, "0x")) {
         rvalue = try std.fmt.parseInt(isize, imm[2..], 16);
