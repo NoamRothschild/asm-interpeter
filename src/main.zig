@@ -1,5 +1,5 @@
 const std = @import("std");
-const lexer = @import("lexer/root.zig");
+const parser = @import("parser/root.zig");
 
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
@@ -8,7 +8,7 @@ pub fn main() !void {
         if (gpa.deinit() == .leak) @panic("Memory was leaked!");
     }
 
-    const instructions = try lexer.parse(allcator,
+    const instructions = try parser.parse(allcator,
         \\ xor BX, BX
         \\ inc bx
         \\ mov al, [Bx]
@@ -22,7 +22,7 @@ pub fn main() !void {
 }
 
 test "all tests" {
-    _ = @import("lexer/instruction.zig");
-    _ = @import("lexer/root.zig");
-    _ = @import("lexer/operand.zig");
+    _ = @import("parser/instruction.zig");
+    _ = @import("parser/root.zig");
+    _ = @import("parser/operand.zig");
 }
