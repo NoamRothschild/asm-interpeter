@@ -3,7 +3,6 @@ const testing = std.testing;
 const register = @import("register.zig");
 const RegisterIdentifier = register.RegisterIdentifier;
 const IndexMode = @import("instruction.zig").IndexMode;
-const RegisterIdentifier16bit = @import("register.zig").RegisterIdentifier16bit;
 
 pub const Operand = union(enum) {
     imm: u16,
@@ -18,8 +17,8 @@ const word_ptr_str = "word ptr";
 const base_registers = [_][]const u8{ "bx", "bp" };
 const index_registers = [_][]const u8{ "si", "di" };
 pub const MemoryExpr = struct {
-    base: ?RegisterIdentifier16bit = null, // bx or bp
-    index: ?RegisterIdentifier16bit = null, // si or di
+    base: ?RegisterIdentifier = null, // bx or bp
+    index: ?RegisterIdentifier = null, // si or di
     displacement: u16 = 0,
     ptr_type: MemExprPtrType = .unknown,
 };
@@ -38,14 +37,7 @@ pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *Ind
 
     const might_reg = register.fromString(raw_op);
     if (might_reg) |reg| {
-        switch (reg) {
-            ._8bit => {
-                mode.* = ._8bit;
-            },
-            ._16bit => {
-                mode.* = ._16bit;
-            },
-        }
+        mode.* = if (reg.size() == ._8bit) ._8bit else ._16bit;
         return Operand{ .reg = reg };
     }
 
@@ -123,14 +115,16 @@ fn parseMemoryExpr(expr: []const u8) !?MemoryExpr {
 
         inline for (base_registers) |reg| {
             if (std.mem.eql(u8, value, reg)) {
-                out_expr.base = @field(RegisterIdentifier16bit, reg);
+                out_expr.base = register.fromString(reg) orelse return error.InvalidExpression;
+                if (out_expr.base.?.size() == ._8bit) return error.InvalidExpression;
                 continue :outer;
             }
         }
 
         inline for (index_registers) |reg| {
             if (std.mem.eql(u8, value, reg)) {
-                out_expr.index = @field(RegisterIdentifier16bit, reg);
+                out_expr.index = register.fromString(reg) orelse return error.InvalidExpression;
+                if (out_expr.index.?.size() == ._8bit) return error.InvalidExpression;
                 continue :outer;
             }
         }
@@ -180,7 +174,7 @@ test "parse memory expression" {
     try testing.expectEqual(MemoryExpr{}, try parseMemoryExpr("[]"));
 
     try testing.expectEqual(MemoryExpr{
-        .index = .si,
+        .index = .{ .base = .si, .selector = .full },
         .ptr_type = .word_ptr,
     }, try parseMemoryExpr("[word ptr si]"));
 
@@ -189,36 +183,36 @@ test "parse memory expression" {
     }, try parseMemoryExpr("[0]"));
 
     try testing.expectEqual(MemoryExpr{
-        .base = .bx,
+        .base = .{ .base = .bx, .selector = .full },
     }, try parseMemoryExpr("[bx ]"));
 
     try testing.expectEqual(MemoryExpr{
-        .index = .si,
+        .index = .{ .base = .si, .selector = .full },
         .ptr_type = .byte_ptr,
     }, try parseMemoryExpr("[  byte ptr  si ]"));
 
     try testing.expectEqual(MemoryExpr{
-        .index = .si,
-        .base = .bx,
+        .index = .{ .base = .si, .selector = .full },
+        .base = .{ .base = .bx, .selector = .full },
     }, try parseMemoryExpr("[si + bx]"));
 
     try testing.expectEqual(MemoryExpr{
-        .index = .di,
-        .base = .bp,
+        .index = .{ .base = .di, .selector = .full },
+        .base = .{ .base = .bp, .selector = .full },
     }, try parseMemoryExpr("[di+bp]"));
 
     try testing.expectEqual(MemoryExpr{
-        .index = .di,
+        .index = .{ .base = .di, .selector = .full },
         .displacement = 0b1001,
     }, try parseMemoryExpr("[di + 1001b]"));
 
     try testing.expectEqual(MemoryExpr{
-        .base = .bx,
+        .base = .{ .base = .bx, .selector = .full },
         .displacement = wrapIntImm(-3),
     }, try parseMemoryExpr("[bx-3]"));
 
     try testing.expectEqual(MemoryExpr{
-        .index = .si,
+        .index = .{ .base = .si, .selector = .full },
         .displacement = wrapIntImm(-0x12),
     }, try parseMemoryExpr("[si - 0x12]"));
 }

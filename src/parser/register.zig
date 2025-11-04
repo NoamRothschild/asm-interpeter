@@ -1,37 +1,42 @@
 const std = @import("std");
 
-pub const Register = struct {
-    const Self = @This();
-    value: u16,
+pub const BaseRegister = enum { ax, bx, cx, dx, si, di, bp };
 
-    pub fn getValue(self: Self) u16 {
-        return self.value;
-    }
+pub const ByteSelector = enum { low, high, full };
 
-    pub fn getLow(self: Self) i8 {
-        return self.value << 8; // TODO: GO OVER AGAIN MAKE SURE DIDNT DO ANYTHING STUPID
+pub const RegisterIdentifier = struct {
+    base: BaseRegister,
+    selector: ByteSelector,
+
+    pub fn size(self: RegisterIdentifier) enum { _8bit, _16bit } {
+        return switch (self.selector) {
+            .low, .high => ._8bit,
+            .full => ._16bit,
+        };
     }
 };
 
-pub const RegisterIdentifier16bit = enum { ax, bx, cx, dx, si, di, bp };
-pub const RegisterIdentifier8bit = enum { al, ah, bl, bh, cl, ch, dl, dh };
-
-pub const RegisterIdentifier = union(enum) { _8bit: RegisterIdentifier8bit, _16bit: RegisterIdentifier16bit };
-
 pub fn fromString(mnemonic: []const u8) ?RegisterIdentifier {
-    inline for (std.meta.fields(RegisterIdentifier8bit)) |field| {
-        if (std.mem.eql(u8, mnemonic, field.name)) {
-            return .{
-                ._8bit = @field(RegisterIdentifier8bit, field.name),
-            };
+    const mapping_8bit = [_]struct { name: []const u8, base: BaseRegister, sel: ByteSelector }{
+        .{ .name = "al", .base = .ax, .sel = .low },
+        .{ .name = "ah", .base = .ax, .sel = .high },
+        .{ .name = "bl", .base = .bx, .sel = .low },
+        .{ .name = "bh", .base = .bx, .sel = .high },
+        .{ .name = "cl", .base = .cx, .sel = .low },
+        .{ .name = "ch", .base = .cx, .sel = .high },
+        .{ .name = "dl", .base = .dx, .sel = .low },
+        .{ .name = "dh", .base = .dx, .sel = .high },
+    };
+
+    for (mapping_8bit) |map| {
+        if (std.mem.eql(u8, mnemonic, map.name)) {
+            return RegisterIdentifier{ .base = map.base, .selector = map.sel };
         }
     }
 
-    inline for (std.meta.fields(RegisterIdentifier16bit)) |field| {
+    inline for (std.meta.fields(BaseRegister)) |field| {
         if (std.mem.eql(u8, mnemonic, field.name)) {
-            return .{
-                ._16bit = @field(RegisterIdentifier16bit, field.name),
-            };
+            return RegisterIdentifier{ .base = @field(BaseRegister, field.name), .selector = .full };
         }
     }
     return null;
