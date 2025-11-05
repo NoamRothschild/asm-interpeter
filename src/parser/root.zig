@@ -11,11 +11,9 @@ pub const IndexMode = @import("instruction.zig").IndexMode;
 pub const LabelMap = @import("label.zig").LabelMap;
 
 const operand = @import("operand.zig");
+const ParseError = @import("../errors.zig").ParseError;
 
-pub const ParseErrors = error{
-    UnknownInstruction,
-    MismatchingOperandSizes,
-};
+pub const ParseErrors = ParseError;
 
 pub const ParseResult = struct {
     instructions: []Instruction,
@@ -32,7 +30,7 @@ pub const ParseResult = struct {
     }
 };
 
-pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) !ParseResult {
+pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) (ParseErrors || error{OutOfMemory})!ParseResult {
     var label_map = LabelMap.init(allocator);
     var instructions = std.ArrayList(Instruction).init(allocator);
     defer instructions.deinit();
@@ -95,7 +93,7 @@ pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) !ParseResult {
         }
     }
     if (has_invalid_label)
-        return error.UnknownLabel;
+        return ParseErrors.UnknownLabel;
 
     return ParseResult{
         .instructions = instruction_arr,
@@ -103,7 +101,7 @@ pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) !ParseResult {
     };
 }
 
-pub fn parseInstruction(allocator: std.mem.Allocator, inst_raw: []const u8) !Instruction {
+pub fn parseInstruction(allocator: std.mem.Allocator, inst_raw: []const u8) (ParseErrors || error{OutOfMemory})!Instruction {
     const inst_type_end = (std.mem.indexOf(u8, inst_raw, " ") orelse inst_raw.len);
     const inst_str_type = inst_raw[0..inst_type_end];
     // std.debug.print("inst_type: {s}\n", .{inst_str_type});
@@ -148,6 +146,42 @@ pub fn parseInstruction(allocator: std.mem.Allocator, inst_raw: []const u8) !Ins
 
         unreachable;
     };
+
+    switch (inst_type) {
+        .lea => {
+            if (right_op) |rop| {
+                switch (rop) {
+                    .mem => {},
+                    else => return ParseErrors.InvalidOperandType,
+                }
+            } else return ParseErrors.InvalidOperandType;
+        },
+        .inc, .dec, .not, .neg => {
+            if (left_op) |lop| {
+                switch (lop) {
+                    .imm => return ParseErrors.InvalidOperandType,
+                    else => {},
+                }
+            }
+        },
+        else => {},
+    }
+
+    // If operation is 8-bit and any immediate is provided, ensure it fits in 8 bits
+    if (indexing_mode == ._8bit) {
+        if (left_op) |lop| {
+            switch (lop) {
+                .imm => |v| if (v > 0x00FF) return ParseErrors.ImmediateOutOfRange,
+                else => {},
+            }
+        }
+        if (right_op) |rop| {
+            switch (rop) {
+                .imm => |v| if (v > 0x00FF) return ParseErrors.ImmediateOutOfRange,
+                else => {},
+            }
+        }
+    }
 
     return Instruction{
         .inst = inst_type,

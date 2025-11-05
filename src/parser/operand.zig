@@ -4,6 +4,7 @@ const register = @import("register.zig");
 const RegisterIdentifier = register.RegisterIdentifier;
 const IndexMode = @import("instruction.zig").IndexMode;
 const Context = @import("../CPU/context.zig").Context;
+const ParseError = @import("../errors.zig").ParseError;
 
 pub const Operand = union(enum) {
     imm: u16,
@@ -31,16 +32,21 @@ pub const MemoryExpr = struct {
     }
 };
 
+fn tryParseInt(comptime T: type, s: []const u8, base: u8) OperandParseErrors!T {
+    return std.fmt.parseInt(T, s, base) catch |e| switch (e) {
+        error.Overflow => OperandParseErrors.ImmediateOutOfRange,
+        error.InvalidCharacter => OperandParseErrors.InvalidExpression,
+    };
+}
+
 // TODO: OR the parse errors with all the possible error sets
-pub const OperandParseErrors = error{
-    NoOperandForString,
-};
+pub const OperandParseErrors = ParseError;
 
 /// parses an operand.
 /// returns `null` when raw_op.len == 0
 /// fails if an operand was found, but was unable to be diagnosed, or
 /// an error had occured while parsig after the operand type had been found.
-pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *IndexMode) !?Operand {
+pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *IndexMode) (OperandParseErrors || error{OutOfMemory})!?Operand {
     if (raw_op.len == 0) return null;
 
     const might_reg = register.fromString(raw_op);
@@ -48,8 +54,6 @@ pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *Ind
         mode.* = if (reg.size() == ._8bit) ._8bit else ._16bit;
         return Operand{ .reg = reg };
     }
-
-    // TODO: place label recognition over here
 
     const might_imm = try parseImmediate(raw_op);
     if (might_imm) |imm| {
@@ -69,7 +73,7 @@ pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *Ind
     return Operand{ .unverified_label = try allocator.dupe(u8, raw_op) };
 }
 
-fn parseImmediate(imm: []const u8) !?u16 {
+fn parseImmediate(imm: []const u8) OperandParseErrors!?u16 {
     var rvalue: isize = 0;
     if (imm.len == 0)
         return null;
@@ -77,25 +81,26 @@ fn parseImmediate(imm: []const u8) !?u16 {
     if (imm.len == 3 and imm[0] == imm[2] and imm[0] == '\'') {
         rvalue = imm[1];
     } else if (std.mem.startsWith(u8, imm, "0b")) {
-        rvalue = try std.fmt.parseInt(isize, imm[2..], 2);
+        rvalue = try tryParseInt(isize, imm[2..], 2);
     } else if (std.mem.startsWith(u8, imm, "0x")) {
-        rvalue = try std.fmt.parseInt(isize, imm[2..], 16);
+        rvalue = try tryParseInt(isize, imm[2..], 16);
     } else if ((imm[0] == '0' or imm[0] == '1') and imm[imm.len - 1] == 'b') {
-        rvalue = try std.fmt.parseInt(isize, imm[0 .. imm.len - 1], 2);
+        rvalue = try tryParseInt(isize, imm[0 .. imm.len - 1], 2);
     } else if (std.ascii.isHex(imm[0]) and imm[imm.len - 1] == 'h') {
-        rvalue = try std.fmt.parseInt(isize, imm[0 .. imm.len - 1], 16);
+        rvalue = try tryParseInt(isize, imm[0 .. imm.len - 1], 16);
     } else if ((std.ascii.isDigit(imm[0]) or imm[0] == '-') and imm[imm.len - 1] == 'd') {
-        rvalue = try std.fmt.parseInt(isize, imm[0 .. imm.len - 1], 10);
+        rvalue = try tryParseInt(isize, imm[0 .. imm.len - 1], 10);
     } else {
-        rvalue = std.fmt.parseInt(isize, imm, 10) catch {
-            return null;
+        rvalue = std.fmt.parseInt(isize, imm, 10) catch |e| switch (e) {
+            error.Overflow => return OperandParseErrors.ImmediateOutOfRange,
+            error.InvalidCharacter => return null,
         };
     }
 
     return @bitCast(@as(i16, @truncate(rvalue)));
 }
 
-fn parseMemoryExpr(expr: []const u8) !?MemoryExpr {
+fn parseMemoryExpr(expr: []const u8) OperandParseErrors!?MemoryExpr {
     if (expr[0] != '[' or expr[expr.len - 1] != ']') {
         return null;
     }
@@ -115,7 +120,7 @@ fn parseMemoryExpr(expr: []const u8) !?MemoryExpr {
         // handle case of "identifier-immediate" with *no whitespace seperator*, ex: "bx-5"
         const value = blk: {
             if (v.len > 1) if (std.mem.indexOfScalar(u8, v, '-')) |sc| {
-                out_expr.displacement -%= try parseImmediate(v[sc + 1 ..]) orelse return error.InvalidExpression;
+                out_expr.displacement -%= try parseImmediate(v[sc + 1 ..]) orelse return OperandParseErrors.InvalidExpression;
                 break :blk v[0..sc];
             };
             break :blk v;
@@ -123,28 +128,28 @@ fn parseMemoryExpr(expr: []const u8) !?MemoryExpr {
 
         inline for (base_registers) |reg| {
             if (std.mem.eql(u8, value, reg)) {
-                out_expr.base = register.fromString(reg) orelse return error.InvalidExpression;
-                if (out_expr.base.?.size() == ._8bit) return error.InvalidExpression;
+                out_expr.base = register.fromString(reg) orelse return OperandParseErrors.InvalidExpression;
+                if (out_expr.base.?.size() == ._8bit) return OperandParseErrors.InvalidExpression;
                 continue :outer;
             }
         }
 
         inline for (index_registers) |reg| {
             if (std.mem.eql(u8, value, reg)) {
-                out_expr.index = register.fromString(reg) orelse return error.InvalidExpression;
-                if (out_expr.index.?.size() == ._8bit) return error.InvalidExpression;
+                out_expr.index = register.fromString(reg) orelse return OperandParseErrors.InvalidExpression;
+                if (out_expr.index.?.size() == ._8bit) return OperandParseErrors.InvalidExpression;
                 continue :outer;
             }
         }
 
         // handle cases like "- 5"
         if (value.len == 1 and value[0] == '-') {
-            const imm = it.next() orelse return error.InvalidExpression;
-            out_expr.displacement -%= try parseImmediate(imm) orelse return error.InvalidExpression;
+            const imm = it.next() orelse return OperandParseErrors.InvalidExpression;
+            out_expr.displacement -%= try parseImmediate(imm) orelse return OperandParseErrors.InvalidExpression;
             continue :outer;
         }
 
-        out_expr.displacement +%= try parseImmediate(value) orelse return error.InvalidEffectiveAdreess;
+        out_expr.displacement +%= try parseImmediate(value) orelse return OperandParseErrors.InvalidEffectiveAddress;
     }
 
     return out_expr;

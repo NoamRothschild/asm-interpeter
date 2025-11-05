@@ -13,8 +13,9 @@ const registerFromString = @import("../parser/register.zig").fromString;
 const valueOf = @import("../parser/operand.zig").valueOf;
 const parser_root = @import("../parser/root.zig");
 const testing = std.testing;
+const ExecError = @import("../errors.zig").ExecError;
 
-pub fn executeInstruction(ctx: *Context) !void {
+pub fn executeInstruction(ctx: *Context) ExecError!void {
     defer ctx.*.ip +%= 1;
     const inst = ctx.instructions[ctx.ip];
     var exit: bool = true;
@@ -83,7 +84,7 @@ pub fn executeInstruction(ctx: *Context) !void {
         .mov => store(ctx, lhs, valueOf(rhs, ctx)),
         .lea => {
             // Load Effective Address - only works with memory operands
-            try assert(rhs == .mem);
+            if (rhs != .mem) return ExecError.InvalidOperandType;
             const mem_expr = rhs.mem;
             const addr = mem_expr.finalAddr(ctx);
             store(ctx, lhs, addr);
@@ -330,10 +331,6 @@ fn shouldJump(ctx: *Context, inst: InstructionType) bool {
         .jcxz => ctx.getRegister(registerFromString("cx").?) == 0,
         else => false,
     };
-}
-
-fn assert(c: bool) error{AssertionFailed}!void {
-    if (!c) return error.AssertionFailed;
 }
 
 fn store(ctx: *Context, out_operand: Operand, value: u16) void {
