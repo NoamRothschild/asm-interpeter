@@ -3,6 +3,7 @@ const testing = std.testing;
 const register = @import("register.zig");
 const RegisterIdentifier = register.RegisterIdentifier;
 const IndexMode = @import("instruction.zig").IndexMode;
+const Context = @import("../CPU/context.zig").Context;
 
 pub const Operand = union(enum) {
     imm: u16,
@@ -21,6 +22,13 @@ pub const MemoryExpr = struct {
     index: ?RegisterIdentifier = null, // si or di
     displacement: u16 = 0,
     ptr_type: MemExprPtrType = .unknown,
+
+    pub fn finalAddr(self: *MemoryExpr, ctx: *Context) u16 {
+        var addr = self.displacement;
+        addr +%= if (self.base) ctx.getRegister(self.base) else 0;
+        addr +%= if (self.index) ctx.getRegister(self.index) else 0;
+        return addr % 65536;
+    }
 };
 
 // TODO: OR the parse errors with all the possible error sets
@@ -144,6 +152,23 @@ fn parseMemoryExpr(expr: []const u8) !?MemoryExpr {
 
 pub fn wrapIntImm(v: i16) u16 {
     return @bitCast(v);
+}
+
+pub fn valueOf(operand: Operand, ctx: *const Context) u16 {
+    return switch (operand) {
+        .imm => |v| v,
+        .reg => |v| ctx.*.getRegister(v),
+        .mem => |v| {
+            const addr = v.finalAddr(ctx);
+
+            const read_value = switch (v.ptr_type) {
+                .unknown, .word_ptr => ctx.readWord(addr),
+                .byte_ptr => @as(u16, ctx.dataseg[addr]),
+            };
+
+            return read_value;
+        },
+    };
 }
 
 test "parse immediate" {
