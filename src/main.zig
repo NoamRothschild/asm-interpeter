@@ -60,4 +60,5 @@ test "all tests" {
     _ = @import("parser/instruction.zig");
     _ = @import("parser/root.zig");
     _ = @import("parser/operand.zig");
+    _ = @import("CPU/executor.zig");
 }

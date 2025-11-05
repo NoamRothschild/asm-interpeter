@@ -2,13 +2,17 @@ const std = @import("std");
 
 const Context = @import("context.zig").Context;
 const Register = @import("register.zig").Register;
+const FlagsRegister = @import("register.zig").FlagsRegister;
 const Instruction = @import("../parser/instruction.zig").Instruction;
 const InstructionType = @import("../parser/instruction.zig").InstructionType;
 const Operand = @import("../parser/operand.zig").Operand;
 const RegisterIdentifier = @import("../parser/register.zig").RegisterIdentifier;
 const BaseRegister = @import("../parser/register.zig").BaseRegister;
 const ByteSelector = @import("../parser/register.zig").ByteSelector;
+const registerFromString = @import("../parser/register.zig").fromString;
 const valueOf = @import("../parser/operand.zig").valueOf;
+const parser_root = @import("../parser/root.zig");
+const testing = std.testing;
 
 pub fn executeInstruction(ctx: *Context) !void {
     defer ctx.*.ip +%= 1;
@@ -323,8 +327,7 @@ fn shouldJump(ctx: *Context, inst: InstructionType) bool {
         .jle, .jng => ctx.flags.z or (ctx.flags.s != ctx.flags.o),
         .jae, .jnc => !ctx.flags.c,
         .jbe => ctx.flags.c or ctx.flags.z,
-        .jcxz => ctx.getRegister(RegisterIdentifier{ .base = BaseRegister.cx, .selector = ByteSelector.full }) == 0,
-        // .jnae handled above with .jb and .jc
+        .jcxz => ctx.getRegister(registerFromString("cx").?) == 0,
         else => false,
     };
 }
@@ -344,4 +347,273 @@ fn store(ctx: *Context, out_operand: Operand, value: u16) void {
         },
         else => {},
     }
+}
+
+fn initTestCtx() Context {
+    return Context{
+        .ax = .{ .value = 0 },
+        .bx = .{ .value = 0 },
+        .cx = .{ .value = 0 },
+        .dx = .{ .value = 0 },
+        .si = .{ .value = 0 },
+        .di = .{ .value = 0 },
+        .bp = .{ .value = 0 },
+        .ip = 0,
+        .flags = std.mem.zeroes(FlagsRegister),
+        .dataseg = [_]u8{0} ** 65536,
+        .instructions = &[_]parser_root.Instruction{},
+    };
+}
+
+fn resetCtx(ctx: *Context) void {
+    ctx.*.ax.value = 0;
+    ctx.*.bx.value = 0;
+    ctx.*.cx.value = 0;
+    ctx.*.dx.value = 0;
+    ctx.*.si.value = 0;
+    ctx.*.di.value = 0;
+    ctx.*.bp.value = 0;
+    ctx.ip = 0;
+    ctx.flags = std.mem.zeroes(FlagsRegister);
+    @memset(&ctx.dataseg, 0);
+}
+
+fn parseInst(s: []const u8) !parser_root.Instruction {
+    return try parser_root.parseInstruction(testing.allocator, s);
+}
+
+test "executor mov/lea" {
+    var ctx = initTestCtx();
+
+    // mov reg, imm
+    resetCtx(&ctx);
+    const inst1 = try parseInst("mov ax, 0x1234");
+    ctx.instructions = &[_]parser_root.Instruction{inst1};
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x1234), ctx.getRegister(registerFromString("ax").?));
+
+    // mov mem, reg
+    resetCtx(&ctx);
+    const inst2 = try parseInst("mov [bx], ax");
+    ctx.instructions = &[_]parser_root.Instruction{inst2};
+    ctx.setRegister(registerFromString("ax").?, 0xBEEF);
+    ctx.setRegister(registerFromString("bx").?, 0x0100);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xBEEF), ctx.readWord(0x0100));
+
+    // mov reg, mem
+    resetCtx(&ctx);
+    const inst3 = try parseInst("mov dx, [bx]");
+    ctx.instructions = &[_]parser_root.Instruction{inst3};
+    ctx.setRegister(registerFromString("bx").?, 0x0100);
+    ctx.writeWord(0x0100, 0xCAFE);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xCAFE), ctx.getRegister(registerFromString("dx").?));
+
+    // lea bx, [bp+si+4]
+    resetCtx(&ctx);
+    const inst4 = try parseInst("lea bx, [bp+si+4]");
+    ctx.instructions = &[_]parser_root.Instruction{inst4};
+    ctx.setRegister(registerFromString("bp").?, 3);
+    ctx.setRegister(registerFromString("si").?, 5);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 12), ctx.getRegister(registerFromString("bx").?));
+}
+
+test "executor logic and/test/or/xor/not" {
+    var ctx = initTestCtx();
+
+    // and
+    resetCtx(&ctx);
+    const inst1 = try parseInst("and ax, 0x0F0F");
+    ctx.instructions = &[_]parser_root.Instruction{inst1};
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x0000), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.z);
+    try testing.expect(!ctx.flags.c and !ctx.flags.o);
+
+    // test (no store)
+    resetCtx(&ctx);
+    const inst2 = try parseInst("test ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst2};
+    ctx.setRegister(registerFromString("ax").?, 2);
+    try executeInstruction(&ctx);
+    try testing.expect(ctx.flags.z);
+
+    // or
+    resetCtx(&ctx);
+    const inst3 = try parseInst("or ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst3};
+    ctx.setRegister(registerFromString("ax").?, 0);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 1), ctx.getRegister(registerFromString("ax").?));
+
+    // xor
+    resetCtx(&ctx);
+    const inst4 = try parseInst("xor ax, 0xFFFF");
+    ctx.instructions = &[_]parser_root.Instruction{inst4};
+    ctx.setRegister(registerFromString("ax").?, 0x00FF);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xFF00), ctx.getRegister(registerFromString("ax").?));
+
+    // not
+    resetCtx(&ctx);
+    const inst5 = try parseInst("not ax");
+    ctx.instructions = &[_]parser_root.Instruction{inst5};
+    ctx.setRegister(registerFromString("ax").?, 0x0F0F);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xF0F0), ctx.getRegister(registerFromString("ax").?));
+}
+
+test "executor inc/dec/neg" {
+    var ctx = initTestCtx();
+
+    // inc sets Z,S,O; preserves C
+    resetCtx(&ctx);
+    const inst1 = try parseInst("inc ax");
+    ctx.instructions = &[_]parser_root.Instruction{inst1};
+    ctx.setRegister(registerFromString("ax").?, 0x7FFF);
+    ctx.flags.c = true;
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x8000), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.o);
+    try testing.expect(ctx.flags.c); // preserved
+
+    // dec
+    resetCtx(&ctx);
+    const inst2 = try parseInst("dec ax");
+    ctx.instructions = &[_]parser_root.Instruction{inst2};
+    ctx.setRegister(registerFromString("ax").?, 0);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xFFFF), ctx.getRegister(registerFromString("ax").?));
+
+    // neg
+    resetCtx(&ctx);
+    const inst3 = try parseInst("neg ax");
+    ctx.instructions = &[_]parser_root.Instruction{inst3};
+    ctx.setRegister(registerFromString("ax").?, 1);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xFFFF), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.c);
+}
+
+test "executor add/sub/cmp" {
+    var ctx = initTestCtx();
+
+    // add
+    resetCtx(&ctx);
+    const inst1 = try parseInst("add ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst1};
+    ctx.setRegister(registerFromString("ax").?, 0xFFFF);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x0000), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.c);
+
+    // sub
+    resetCtx(&ctx);
+    const inst2 = try parseInst("sub ax, 2");
+    ctx.instructions = &[_]parser_root.Instruction{inst2};
+    ctx.setRegister(registerFromString("ax").?, 1);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xFFFF), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.c);
+
+    // cmp (no store)
+    resetCtx(&ctx);
+    const inst3 = try parseInst("cmp ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst3};
+    ctx.setRegister(registerFromString("ax").?, 1);
+    try executeInstruction(&ctx);
+    try testing.expect(ctx.flags.z);
+}
+
+test "executor shifts and rotates" {
+    var ctx = initTestCtx();
+
+    // shl
+    resetCtx(&ctx);
+    const inst1 = try parseInst("shl ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst1};
+    ctx.setRegister(registerFromString("ax").?, 0x8001);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x0002), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.c);
+
+    // shr
+    resetCtx(&ctx);
+    const inst2 = try parseInst("shr ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst2};
+    ctx.setRegister(registerFromString("ax").?, 0x0001);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x0000), ctx.getRegister(registerFromString("ax").?));
+    try testing.expect(ctx.flags.c);
+
+    // sar
+    resetCtx(&ctx);
+    const inst3 = try parseInst("sar ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst3};
+    ctx.setRegister(registerFromString("ax").?, 0x8001);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xC000), ctx.getRegister(registerFromString("ax").?));
+
+    // rol
+    resetCtx(&ctx);
+    const inst4 = try parseInst("rol ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst4};
+    ctx.setRegister(registerFromString("ax").?, 0x8001);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x0003), ctx.getRegister(registerFromString("ax").?));
+
+    // ror
+    resetCtx(&ctx);
+    const inst5 = try parseInst("ror ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst5};
+    ctx.setRegister(registerFromString("ax").?, 0x0001);
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0x8000), ctx.getRegister(registerFromString("ax").?));
+
+    // rcl (with carry-in)
+    resetCtx(&ctx);
+    const inst6 = try parseInst("rcl ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst6};
+    ctx.setRegister(registerFromString("ax").?, 0x7FFF);
+    ctx.flags.c = true;
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xFFFF), ctx.getRegister(registerFromString("ax").?));
+
+    // rcr (with carry-in)
+    resetCtx(&ctx);
+    const inst7 = try parseInst("rcr ax, 1");
+    ctx.instructions = &[_]parser_root.Instruction{inst7};
+    ctx.setRegister(registerFromString("ax").?, 0x8000);
+    ctx.flags.c = true;
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(u16, 0xC000), ctx.getRegister(registerFromString("ax").?));
+}
+
+test "executor jumps" {
+    var ctx = initTestCtx();
+
+    // unconditional jmp to address 3
+    resetCtx(&ctx);
+    const inst1 = try parseInst("jmp 3");
+    ctx.instructions = &[_]parser_root.Instruction{inst1};
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(usize, 3), ctx.ip);
+
+    // je with Z set
+    resetCtx(&ctx);
+    const inst2 = try parseInst("je 5");
+    ctx.instructions = &[_]parser_root.Instruction{inst2};
+    ctx.flags.z = true;
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(usize, 5), ctx.ip);
+
+    // jnc with C cleared
+    resetCtx(&ctx);
+    const inst3 = try parseInst("jnc 2");
+    ctx.instructions = &[_]parser_root.Instruction{inst3};
+    ctx.flags.c = false;
+    try executeInstruction(&ctx);
+    try testing.expectEqual(@as(usize, 2), ctx.ip);
 }
