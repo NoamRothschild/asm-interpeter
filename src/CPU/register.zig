@@ -5,15 +5,15 @@ pub const Register = struct {
     const Self = @This();
     value: u16,
 
-    pub inline fn getValue(self: *Self) u16 {
+    pub inline fn getValue(self: *const Self) u16 {
         return self.value;
     }
 
-    pub inline fn getLow(self: *Self) u8 {
+    pub inline fn getLow(self: *const Self) u8 {
         return @truncate(self.value);
     }
 
-    pub inline fn getHigh(self: *Self) u8 {
+    pub inline fn getHigh(self: *const Self) u8 {
         return @truncate(self.value >> 8);
     }
 
@@ -31,7 +31,7 @@ pub const Register = struct {
         }
     }
 
-    pub fn get(self: *Self, selector: register.ByteSelector) u16 {
+    pub fn get(self: *const Self, selector: register.ByteSelector) u16 {
         return switch (selector) {
             .low => @as(u16, self.getLow()),
             .high => @as(u16, self.getHigh()),

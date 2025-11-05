@@ -3,6 +3,9 @@ const parser = @import("parser/root.zig");
 const ParseResult = parser.ParseResult;
 // TODO: write tests for whole code parts with labels.
 
+const Context = @import("CPU/context.zig").Context;
+const executor = @import("CPU/executor.zig");
+
 pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -11,10 +14,11 @@ pub fn main() !void {
     }
 
     const test_code =
-        \\ xor BX, BX
-        \\ loop1:inc bx
-        \\ mov al, [Bx]
-        \\ CMP AL, '$'
+        \\ xor bx, bx
+        \\ loop1:
+        \\ inc bx
+        \\ mov al, [bx]
+        \\ cmp al, '$'
         \\ jnz loop1
     ;
 
@@ -37,6 +41,19 @@ pub fn main() !void {
     while (it.next()) |entry| {
         std.debug.print("{s}: {d}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
     }
+
+    var ctx = Context{
+        .ip = 0,
+        .instructions = parser_result.instructions,
+        .dataseg = undefined,
+    };
+    @memset(&ctx.dataseg, 0);
+    ctx.dataseg[7] = '$';
+    while (parser_result.instructions[ctx.ip].inst != .hlt) {
+        try executor.executeInstruction(&ctx);
+    }
+    std.log.info("bx: {}", .{ctx.bx});
+    std.log.info("execution finished", .{});
 }
 
 test "all tests" {

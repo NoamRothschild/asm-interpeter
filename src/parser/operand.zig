@@ -23,11 +23,11 @@ pub const MemoryExpr = struct {
     displacement: u16 = 0,
     ptr_type: MemExprPtrType = .unknown,
 
-    pub fn finalAddr(self: *MemoryExpr, ctx: *Context) u16 {
+    pub fn finalAddr(self: *const MemoryExpr, ctx: *const Context) u16 {
         var addr = self.displacement;
-        addr +%= if (self.base) ctx.getRegister(self.base) else 0;
-        addr +%= if (self.index) ctx.getRegister(self.index) else 0;
-        return addr % 65536;
+        addr +%= if (self.base != null) ctx.getRegister(self.base.?) else 0;
+        addr +%= if (self.index != null) ctx.getRegister(self.index.?) else 0;
+        return addr;
     }
 };
 
@@ -168,6 +168,7 @@ pub fn valueOf(operand: Operand, ctx: *const Context) u16 {
 
             return read_value;
         },
+        .unverified_label => unreachable,
     };
 }
 
