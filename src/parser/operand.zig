@@ -60,7 +60,7 @@ pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *Ind
         return Operand{ .imm = imm };
     }
 
-    const might_mem_expr = try parseMemoryExpr(raw_op);
+    const might_mem_expr = try parseMemoryExpr(allocator, raw_op);
     if (might_mem_expr) |mem_expr| {
         if (mem_expr.ptr_type == .byte_ptr) {
             mode.* = ._8bit;
@@ -73,10 +73,13 @@ pub fn parseOperand(allocator: std.mem.Allocator, raw_op: []const u8, mode: *Ind
     return Operand{ .unverified_label = try allocator.dupe(u8, raw_op) };
 }
 
-fn parseImmediate(imm: []const u8) OperandParseErrors!?u16 {
+fn parseImmediate(immediate: []const u8) OperandParseErrors!?u16 {
     var rvalue: isize = 0;
-    if (imm.len == 0)
+    if (immediate.len == 0)
         return null;
+
+    const sign: bool = !(immediate[0] == '-');
+    const imm = if (sign) immediate else immediate[1..];
 
     if (imm.len == 3 and imm[0] == imm[2] and imm[0] == '\'') {
         rvalue = imm[1];
@@ -88,7 +91,7 @@ fn parseImmediate(imm: []const u8) OperandParseErrors!?u16 {
         rvalue = try tryParseInt(isize, imm[0 .. imm.len - 1], 2);
     } else if (std.ascii.isHex(imm[0]) and imm[imm.len - 1] == 'h') {
         rvalue = try tryParseInt(isize, imm[0 .. imm.len - 1], 16);
-    } else if ((std.ascii.isDigit(imm[0]) or imm[0] == '-') and imm[imm.len - 1] == 'd') {
+    } else if (std.ascii.isDigit(imm[0]) and imm[imm.len - 1] == 'd') {
         rvalue = try tryParseInt(isize, imm[0 .. imm.len - 1], 10);
     } else {
         rvalue = std.fmt.parseInt(isize, imm, 10) catch |e| switch (e) {
@@ -96,15 +99,23 @@ fn parseImmediate(imm: []const u8) OperandParseErrors!?u16 {
             error.InvalidCharacter => return null,
         };
     }
+    rvalue *= if (sign) 1 else -1;
 
     return @bitCast(@as(i16, @truncate(rvalue)));
 }
 
-fn parseMemoryExpr(expr: []const u8) OperandParseErrors!?MemoryExpr {
+fn parseMemoryExpr(allocator: std.mem.Allocator, expr: []const u8) (OperandParseErrors || error{OutOfMemory})!?MemoryExpr {
     if (expr[0] != '[' or expr[expr.len - 1] != ']') {
         return null;
     }
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     var body = std.mem.trim(u8, expr, "[]" ++ std.ascii.whitespace);
+    // Normalize: first collapse "- " -> "-", then ensure space before every '-'
+    const step1 = try std.mem.replaceOwned(u8, arena.allocator(), body, "- ", "-");
+    const step2 = try std.mem.replaceOwned(u8, arena.allocator(), step1, "-", " -");
+    body = step2;
     var out_expr = MemoryExpr{};
 
     if (std.mem.startsWith(u8, body, byte_ptr_str)) {
@@ -116,16 +127,7 @@ fn parseMemoryExpr(expr: []const u8) OperandParseErrors!?MemoryExpr {
     }
 
     var it = std.mem.tokenizeAny(u8, body, "+" ++ std.ascii.whitespace);
-    outer: while (it.next()) |v| {
-        // handle case of "identifier-immediate" with *no whitespace seperator*, ex: "bx-5"
-        const value = blk: {
-            if (v.len > 1) if (std.mem.indexOfScalar(u8, v, '-')) |sc| {
-                out_expr.displacement -%= try parseImmediate(v[sc + 1 ..]) orelse return OperandParseErrors.InvalidExpression;
-                break :blk v[0..sc];
-            };
-            break :blk v;
-        };
-
+    outer: while (it.next()) |value| {
         inline for (base_registers) |reg| {
             if (std.mem.eql(u8, value, reg)) {
                 out_expr.base = register.fromString(reg) orelse return OperandParseErrors.InvalidExpression;
@@ -140,13 +142,6 @@ fn parseMemoryExpr(expr: []const u8) OperandParseErrors!?MemoryExpr {
                 if (out_expr.index.?.size() == ._8bit) return OperandParseErrors.InvalidExpression;
                 continue :outer;
             }
-        }
-
-        // handle cases like "- 5"
-        if (value.len == 1 and value[0] == '-') {
-            const imm = it.next() orelse return OperandParseErrors.InvalidExpression;
-            out_expr.displacement -%= try parseImmediate(imm) orelse return OperandParseErrors.InvalidExpression;
-            continue :outer;
         }
 
         out_expr.displacement +%= try parseImmediate(value) orelse return OperandParseErrors.InvalidEffectiveAddress;
@@ -200,50 +195,50 @@ test "parse immediate" {
 }
 
 test "parse memory expression" {
-    try testing.expectEqual(null, try parseMemoryExpr("bx"));
+    try testing.expectEqual(null, try parseMemoryExpr(testing.allocator, "bx"));
 
-    try testing.expectEqual(MemoryExpr{}, try parseMemoryExpr("[]"));
+    try testing.expectEqual(MemoryExpr{}, try parseMemoryExpr(testing.allocator, "[]"));
 
     try testing.expectEqual(MemoryExpr{
         .index = .{ .base = .si, .selector = .full },
         .ptr_type = .word_ptr,
-    }, try parseMemoryExpr("[word ptr si]"));
+    }, try parseMemoryExpr(testing.allocator, "[word ptr si]"));
 
     try testing.expectEqual(MemoryExpr{
         .displacement = 0,
-    }, try parseMemoryExpr("[0]"));
+    }, try parseMemoryExpr(testing.allocator, "[0]"));
 
     try testing.expectEqual(MemoryExpr{
         .base = .{ .base = .bx, .selector = .full },
-    }, try parseMemoryExpr("[bx ]"));
+    }, try parseMemoryExpr(testing.allocator, "[bx ]"));
 
     try testing.expectEqual(MemoryExpr{
         .index = .{ .base = .si, .selector = .full },
         .ptr_type = .byte_ptr,
-    }, try parseMemoryExpr("[  byte ptr  si ]"));
+    }, try parseMemoryExpr(testing.allocator, "[  byte ptr  si ]"));
 
     try testing.expectEqual(MemoryExpr{
         .index = .{ .base = .si, .selector = .full },
         .base = .{ .base = .bx, .selector = .full },
-    }, try parseMemoryExpr("[si + bx]"));
+    }, try parseMemoryExpr(testing.allocator, "[si + bx]"));
 
     try testing.expectEqual(MemoryExpr{
         .index = .{ .base = .di, .selector = .full },
         .base = .{ .base = .bp, .selector = .full },
-    }, try parseMemoryExpr("[di+bp]"));
+    }, try parseMemoryExpr(testing.allocator, "[di+bp]"));
 
     try testing.expectEqual(MemoryExpr{
         .index = .{ .base = .di, .selector = .full },
         .displacement = 0b1001,
-    }, try parseMemoryExpr("[di + 1001b]"));
+    }, try parseMemoryExpr(testing.allocator, "[di + 1001b]"));
 
     try testing.expectEqual(MemoryExpr{
         .base = .{ .base = .bx, .selector = .full },
         .displacement = wrapIntImm(-3),
-    }, try parseMemoryExpr("[bx-3]"));
+    }, try parseMemoryExpr(testing.allocator, "[bx-3]"));
 
     try testing.expectEqual(MemoryExpr{
         .index = .{ .base = .si, .selector = .full },
         .displacement = wrapIntImm(-0x12),
-    }, try parseMemoryExpr("[si - 0x12]"));
+    }, try parseMemoryExpr(testing.allocator, "[si - 0x12]"));
 }
