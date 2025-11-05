@@ -66,7 +66,7 @@ pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) (ParseErrors ||
                 try instructions.append(try parseInstruction(allocator, followed_inst));
         } else {
             const instruction = std.mem.trim(u8, line_lowercased, &std.ascii.whitespace);
-
+            if (instruction.len == 0) continue;
             try instructions.append(try parseInstruction(allocator, instruction));
         }
     }
