@@ -2,13 +2,14 @@
 const std = @import("std");
 // const CPUContext = pc.CPUContext;
 const testing = std.testing;
-const register = @import("register.zig");
+pub const register = @import("register.zig");
 
 pub const Register = @import("register.zig").Register;
 pub const Instruction = @import("instruction.zig").Instruction;
 pub const InstructionType = @import("instruction.zig").InstructionType;
 pub const IndexMode = @import("instruction.zig").IndexMode;
 pub const LabelMap = @import("label.zig").LabelMap;
+pub const Operand = @import("operand.zig").Operand;
 
 const operand = @import("operand.zig");
 const ParseError = @import("../errors.zig").ParseError;
@@ -127,6 +128,11 @@ pub fn parseInstruction(allocator: std.mem.Allocator, inst_raw: []const u8) (Par
 
     const left_op = try operand.parseOperand(allocator, left_op_str, &left_index_mode);
     const right_op = try operand.parseOperand(allocator, right_op_str, &right_index_mode);
+
+    if (right_op != null and left_op != null and (left_op.? == .imm or left_op.? == .unverified_label))
+        return ParseError.InvalidOperandType; // the dst operand cannot me immediate
+    if ((left_op != null and left_op.? == .mem) and (right_op != null and right_op.? == .mem))
+        return ParseError.InvalidOperandType; // fixes double memory opcoodes
 
     const indexing_mode: IndexMode = blk: {
         if (left_index_mode != .unknown and right_index_mode != .unknown and left_index_mode != right_index_mode)

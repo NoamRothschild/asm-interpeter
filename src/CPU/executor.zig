@@ -17,6 +17,7 @@ const ExecError = @import("../errors.zig").ExecError;
 
 pub fn executeInstruction(ctx: *Context) ExecError!void {
     defer ctx.*.ip +%= 1;
+    errdefer ctx.*.ip -%= 1; // don't move ip forward on error
     const inst = ctx.instructions[ctx.ip];
     var exit: bool = true;
 
@@ -29,7 +30,7 @@ pub fn executeInstruction(ctx: *Context) ExecError!void {
     exit = true;
 
     // instructions with only left operand:
-    const lhs = inst.left_operand orelse unreachable;
+    const lhs = inst.left_operand orelse return ExecError.MissingOperand;
     switch (inst.inst) {
         .inc => {
             const lval = valueOf(lhs, ctx);
@@ -79,12 +80,11 @@ pub fn executeInstruction(ctx: *Context) ExecError!void {
     exit = true;
 
     // instructions with both operands:
-    const rhs = inst.right_operand orelse unreachable;
+    const rhs = inst.right_operand orelse return ExecError.MissingOperand;
     switch (inst.inst) {
         .mov => store(ctx, lhs, valueOf(rhs, ctx)),
         .lea => {
-            // Load Effective Address - only works with memory operands
-            if (rhs != .mem) return ExecError.InvalidOperandType;
+            // Load Effective Address
             const mem_expr = rhs.mem;
             const addr = mem_expr.finalAddr(ctx);
             store(ctx, lhs, addr);

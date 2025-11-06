@@ -10,5 +10,5 @@ pub const ParseError = error{
 
 pub const ExecError = error{
     Halted,
-    InvalidOperandType,
+    MissingOperand,
 };
