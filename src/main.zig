@@ -7,6 +7,8 @@ const Context = @import("CPU/context.zig").Context;
 const executor = @import("CPU/executor.zig");
 
 pub fn main() !void {
+    try @import("repl/root.zig").main(.{});
+
     var gpa = std.heap.DebugAllocator(.{}){};
     const allocator = gpa.allocator();
     defer {
