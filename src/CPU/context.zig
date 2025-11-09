@@ -59,4 +59,23 @@ pub const Context = struct {
         const arr_ptr = @as(*[2]u8, @ptrCast(&self.dataseg[idx]));
         std.mem.writeInt(u16, arr_ptr, word, .little);
     }
+
+    pub fn format(
+        self: @This(),
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{{ ax = 0x{x}, bx = 0x{x}, cx = 0x{x}, dx = 0x{x}, si = 0x{x}, di = 0x{x}, bp = 0x{x}, ip = {d}, flags = {} }}", .{
+            self.ax.value,
+            self.bx.value,
+            self.cx.value,
+            self.dx.value,
+            self.si.value,
+            self.di.value,
+            self.bp.value,
+            self.ip,
+            self.flags,
+        });
+    }
 };

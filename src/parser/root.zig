@@ -58,7 +58,7 @@ pub fn parse(allocator: std.mem.Allocator, raw_code: []const u8) (ParseErrors ||
         const might_label = std.mem.indexOfScalar(u8, line_lowercased, ':');
         if (might_label) |label_end| {
             const label_name = std.mem.trim(u8, line_lowercased[0..label_end], &std.ascii.whitespace);
-            std.debug.print("found a label: {s}.\n", .{label_name});
+            std.log.info("found a label: {s}.\n", .{label_name});
             const followed_inst = std.mem.trim(u8, line_lowercased[label_end + 1 ..], &std.ascii.whitespace);
 
             try label_map.put(try allocator.dupe(u8, label_name), instructions.items.len);
