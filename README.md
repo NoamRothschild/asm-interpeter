@@ -1,6 +1,6 @@
-# 8086 Assembly Interpeter
+# 8086 Assembly Interpreter
 
-_an absurdly simple 8086 interpeter for my school’s assembly entrance exam evaluation system._
+_an absurdly simple 8086 interpreter for my school’s assembly entrance exam evaluation system._
 
 ## THIS PROJECT IS STILL IN CONSTRUCTION...
 

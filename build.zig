@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "asmParser",
+        .name = "asm-run",
         .root_module = exe_mod,
     });
 
