@@ -47,6 +47,7 @@ pub const InstructionType = enum {
     jnbe,
     jnae,
     hlt,
+    loop,
 
     const self = @This();
     pub fn fromString(mnemonic: []const u8) ?self {

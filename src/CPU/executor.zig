@@ -74,6 +74,11 @@ pub fn executeInstruction(ctx: *Context) ExecError!void {
                 ctx.*.ip -%= 1; // undo the defer increment
             }
         },
+        .loop => {
+            ctx.*.cx.value -%= 1;
+            if (ctx.*.cx.getValue() != 0)
+                ctx.*.ip = lhs.imm -% 1;
+        },
         else => exit = false,
     }
     if (exit) return;
